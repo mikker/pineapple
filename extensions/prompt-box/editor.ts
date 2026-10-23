@@ -10,10 +10,7 @@ import {
   type TUI,
   type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
-// Public exports in the host's declaration files, not private Editor state.
-// Pi 1.4 has no text-decoration hook or root re-export for these utilities.
-import { wordWrapLine } from "@earendil-works/pi-tui/dist/components/editor.js";
-import { extractAnsiCode } from "@earendil-works/pi-tui/dist/utils.js";
+import { extractAnsiCode, wordWrapLine } from "./annotation.ts";
 import {
   recognizedReferences,
   selectedSkills,

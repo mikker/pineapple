@@ -18,14 +18,17 @@ as selected skills. Below eight columns the editor renders exactly as native
   Menus remain outside the box at their native row positions.
 - Pi 1.4 has **no text-decoration hook**. Highlighting is a foreground-only
   annotation pass on content rows bounded by the border hooks. It projects the
-  shared parser's source spans through the host's exported `wordWrapLine`, then
-  verifies the projection against native output before decorating it. The
-  host's `extractAnsiCode` preserves CSI, OSC, APC, fake cursor and IME sequences
+  shared parser's source spans through a small vendored `wordWrapLine`, then
+  verifies the projection against native output before decorating it. A local
+  `extractAnsiCode` preserves CSI, OSC, APC, fake cursor and IME sequences
   in their original order. Neither text nor cursor positions are reconstructed.
-  These two helpers require deep imports from `pi-tui/dist` because the host's
-  root module does not re-export them. This is a **Pi 1.4 compatibility boundary**;
-  renderer tests guard it. A future native source-range styling hook should
-  replace this small annotation layer.
+  These annotation-only helpers are derived from Pi 1.4 (Mario Zechner, MIT;
+  see `../../THIRD_PARTY_NOTICES.md`). Public `wrapTextWithAnsi` has different
+  whitespace/wrap semantics and no source offsets. Managed installs supply only
+  root host aliases, so runtime code uses no deep imports, physical host peers,
+  or host path probing. This is a **Pi 1.4 compatibility boundary**; renderer
+  tests guard it and mismatched rows skip decoration. A future native
+  source-range styling hook should replace this small annotation layer.
 - Collapsed paste markers keep their native atomic geometry. They are not
   decorated; their expanded content still contributes to the selection label.
 - The label uses the live `ctx.ui.theme` on every render, and disappears when

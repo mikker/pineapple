@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import {
@@ -86,6 +87,49 @@ function fixture() {
 }
 
 const plain = (lines: string[]) => lines.map(stripTerminalSequences);
+
+test("runtime modules use only root host aliases, never physical host subpaths", () => {
+  const directory = new URL("./", import.meta.url);
+  const runtime = readdirSync(directory).filter(
+    (name) => name.endsWith(".ts") && !name.endsWith(".test.ts"),
+  );
+  assert.ok(runtime.includes("editor.ts"));
+  assert.ok(runtime.includes("annotation.ts"));
+  for (const name of runtime) {
+    const source = readFileSync(new URL(name, directory), "utf8");
+    // Includes static imports/re-exports and literal require/dynamic imports.
+    assert.doesNotMatch(source, /["'`]@earendil-works\/pi-[^/"'`]+\//, name);
+  }
+});
+
+test("annotation wrapping preserves native whitespace and CJK boundaries", () => {
+  for (const text of [
+    "  $first   /skill:second  ",
+    "界 $first 中文 /skill:second",
+    "é 🙂 $first\t /skill:second",
+    "$first\u00a0\u2003/skill:second",
+  ]) {
+    for (const width of [14, 19, 28]) {
+      const { editor, native } = fixture();
+      editor.setText(text);
+      native.setText(text);
+      const rendered = editor.render(width);
+      assert.deepEqual(
+        plain(rendered.slice(1, -1)).map((line) => line.slice(1, -1)),
+        plain(native.render(width - 2).slice(1, -1)),
+      );
+      const highlighted = [
+        ...rendered
+          .slice(1, -1)
+          .join("")
+          .matchAll(/\x1b\[31m([^\x1b]*)\x1b\[39m/g),
+      ]
+        .map((match) => match[1])
+        .join("");
+      assert.equal(highlighted, "$first/skill:second", `${width}: ${text}`);
+    }
+  }
+});
 
 test("foreground decoration preserves native IME, fake cursor, OSC and SGR boundaries", () => {
   const link = "\x1b]8;;https://example.test\x07";
