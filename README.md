@@ -18,10 +18,12 @@ pi install git:github.com/mikker/pineapple
 | Firecrawl | `search`, `scrape`, `crawl`. SDK loaded only on use; cancelled/failed crawls attempt remote-job cleanup. |
 | Subagents | Pi, Claude Code and Codex; spawn/check/wait/cancel/list tools and `/subagents`. No `/btw`. |
 | Inline skills | `$name` or `/skill:name` anywhere in a prompt, with completion, deduplication and skill-relative references. |
-| Prompt box | Native-editor-based skill highlighting and selected-skill UI. Native Pi shortcuts and completion are retained. |
+| Prompt box | Dim frame with project/Git status and model/fast/reasoning in its top border, skill highlighting and numbered image attachments. Native Pi shortcuts and completion are retained. |
 
-No custom header/footer, theme override, Git/model telemetry loop, automatic
-summaries, workflows, or copy-all command is installed. Those legacy extensions
+The footer retains extension statuses (including background terminals and subagents)
+without duplicating prompt-box information. Git refreshes on session start, branch
+changes and tool/agent completion, not on a polling loop. No custom header, theme
+override, automatic summaries, workflows, or copy-all command is installed. Those legacy extensions
 have been removed rather than merely hidden behind configuration filters.
 
 OpenAI-specific patching and optional priority service live separately in

@@ -11,6 +11,8 @@ import {
   type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import { extractAnsiCode, wordWrapLine } from "./annotation.ts";
+import { statusBorder } from "./status.ts";
+import type { ImagePathLabels } from "./images.ts";
 import {
   recognizedReferences,
   selectedSkills,
@@ -19,6 +21,11 @@ import {
 
 const BOTTOM_BOUNDARY = "\x1b]777;pineapple-prompt-box-bottom\x07";
 const MIN_BOX_WIDTH = 8;
+
+type Chrome = {
+  dim: (text: string) => string;
+  status: () => { left: string; right: string };
+};
 
 /** Apply foreground only; preserve all native control sequences (including IME
  * and reverse-video cursor markers) byte for byte, in their original order. */
@@ -89,6 +96,8 @@ export class PromptBoxEditor extends CustomEditor {
   private currentWidth = 0;
   private getSkills: () => Skill[];
   private accent: (text: string) => string;
+  private chrome?: Chrome;
+  private images?: ImagePathLabels;
 
   constructor(
     tui: TUI,
@@ -97,14 +106,41 @@ export class PromptBoxEditor extends CustomEditor {
     getSkills: () => Skill[],
     accent: (text: string) => string,
     autocompleteMaxVisible = 5,
+    chrome?: Chrome,
+    images?: ImagePathLabels,
   ) {
     super(tui, theme, keybindings, { paddingX: 1, autocompleteMaxVisible });
     this.getSkills = getSkills;
     this.accent = accent;
+    this.chrome = chrome;
+    this.images = images;
+  }
+
+  override setText(text: string) {
+    super.setText(this.images?.collapse(text) ?? text);
+  }
+
+  override insertTextAtCursor(text: string) {
+    super.insertTextAtCursor(this.images?.collapse(text) ?? text);
+  }
+
+  override handleInput(data: string) {
+    if (
+      this.images &&
+      data.startsWith("\x1b[200~") &&
+      data.endsWith("\x1b[201~")
+    ) {
+      data = `\x1b[200~${this.images.collapse(data.slice(6, -6))}\x1b[201~`;
+    }
+    super.handleInput(data);
   }
 
   protected override renderTopBorder(width: number, hidden: number) {
     this.hiddenAbove = hidden;
+    if (this.boxed && !hidden && this.chrome) {
+      const { left, right } = this.chrome.status();
+      return statusBorder(width, left, right, this.chrome.dim);
+    }
     return super.renderTopBorder(width, hidden);
   }
 
@@ -120,6 +156,7 @@ export class PromptBoxEditor extends CustomEditor {
 
   override render(width: number) {
     this.currentWidth = width;
+    if (this.chrome) this.borderColor = this.chrome.dim;
     this.boxed = width >= MIN_BOX_WIDTH;
     if (!this.boxed) return super.render(width);
     const innerWidth = width - 2;
@@ -182,7 +219,7 @@ export class PromptBoxEditor extends CustomEditor {
     result.push(
       border("╰") +
         truncateToWidth(this.bottomRule, innerWidth - visibleWidth(label), "") +
-        this.accent(label) +
+        (label ? this.accent(label) : "") +
         border("╯"),
     );
     // Autocomplete belongs to native Editor and remains outside the box. The

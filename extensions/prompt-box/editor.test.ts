@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import {
@@ -23,6 +31,7 @@ import {
   type Skill,
 } from "../inline-skills/skills.ts";
 import { decorateLine, projectReferences, PromptBoxEditor } from "./editor.ts";
+import { ImagePathLabels } from "./images.ts";
 import promptBox from "./index.ts";
 import type {
   ExtensionAPI,
@@ -54,7 +63,10 @@ const skills: Skill[] = [
 const red = (text: string) => `\x1b[31m${text}\x1b[39m`;
 const green = (text: string) => `\x1b[32m${text}\x1b[39m`;
 
-function fixture() {
+function fixture(
+  chrome?: ConstructorParameters<typeof PromptBoxEditor>[6],
+  images?: ImagePathLabels,
+) {
   // Only the terminal size and render scheduler are used by native Editor.
   const tui = {
     terminal: { rows: 24, columns: 80 },
@@ -75,6 +87,9 @@ function fixture() {
     keys,
     () => skills,
     (text) => accent(text),
+    5,
+    chrome,
+    images,
   );
   const native = new CustomEditor(tui, editorTheme, keys, { paddingX: 1 });
   return {
@@ -87,6 +102,63 @@ function fixture() {
 }
 
 const plain = (lines: string[]) => lines.map(stripTerminalSequences);
+
+test("image labels survive paste, insertion, undo and submission without showing paths", () => {
+  const directory = mkdtempSync(join(tmpdir(), "prompt-images-"));
+  try {
+    const path = join(directory, "screenshot.png");
+    writeFileSync(path, "test");
+    const images = new ImagePathLabels();
+    const { editor } = fixture(undefined, images);
+    editor.setText(path);
+    assert.equal(editor.getText(), "[Image #1]");
+    assert.ok(!plain(editor.render(80)).join("").includes(path));
+    editor.setText("");
+    editor.insertTextAtCursor(path);
+    assert.equal(editor.getText(), "[Image #1]");
+    editor.handleInput("\x1f");
+    assert.equal(editor.getText(), "");
+    editor.handleInput(`\x1b[200~${path}\x1b[201~`);
+    assert.equal(editor.getText(), "[Image #1]");
+    let submitted = "";
+    editor.onSubmit = (text) => {
+      submitted = images.expand(text);
+    };
+    editor.handleInput("\r");
+    assert.equal(submitted, path);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("prompt telemetry occupies the top rule and every frame edge stays dim", () => {
+  let right = "gpt-6.1-sol  fast  ◐medium";
+  const { editor } = fixture({
+    dim: green,
+    status: () => ({ left: "✌︎ project · main · clean", right }),
+  });
+  editor.setText("hello");
+  editor.borderColor = red; // The host changes this when thinking level changes.
+  const lines = editor.render(100);
+  assert.match(
+    stripTerminalSequences(lines[0]!),
+    /✌︎ project · main · clean.*gpt-6.1-sol  fast  ◐medium/,
+  );
+  assert.ok(
+    lines.every((line) =>
+      line.startsWith(
+        green(line === lines[0] ? "╭" : line === lines.at(-1) ? "╰" : "│"),
+      ),
+    ),
+  );
+  assert.ok(!lines.join("").includes("\x1b[31m"));
+  right = "new-model  ◐high";
+  assert.ok(stripTerminalSequences(editor.render(100)[0]!).includes(right));
+  for (const width of [8, 12, 30, 80]) {
+    for (const line of editor.render(width))
+      assert.ok(visibleWidth(line) <= width);
+  }
+});
 
 test("runtime modules use only root host aliases, never physical host subpaths", () => {
   const directory = new URL("./", import.meta.url);
@@ -304,7 +376,6 @@ test("native scrolling is preserved and projection follows the native visible so
 
 test("keyboard handling, paste, submit and cursor stay native", () => {
   const { editor, native } = fixture();
-  assert.equal(editor.handleInput, CustomEditor.prototype.handleInput);
   let submitted = "";
   editor.onSubmit = (text) => {
     submitted = text;
