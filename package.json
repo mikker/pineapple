@@ -1,11 +1,39 @@
 {
+  "workspaces": [
+    "extensions/*"
+  ],
+  "overrides": {
+    "effect": "$effect",
+    "@effect/platform-node": "$@effect/platform-node",
+    "@effect/platform-node-shared": "4.0.0-beta.101",
+    "@effect/vitest": "4.0.0-beta.101"
+  },
   "dependencies": {
-    "@earendil-works/pi-ai": "^0.82.0",
-    "@earendil-works/pi-coding-agent": "^0.82.0",
-    "@earendil-works/pi-tui": "^0.82.0",
+    "@effect/platform-node": "4.0.0-beta.101",
     "acorn": "^8.17.0",
+    "effect": "4.0.0-beta.101",
     "firecrawl": "^4.30.0",
-    "typebox": "^1.3.6"
+    "ioredis": "5.11.1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
@@ -14,9 +42,9 @@
   },
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit",
-    "format": "prettier --write \"extensions/**/*.{ts,cjs}\" \"*.json\"",
-    "format:check": "prettier --check \"extensions/**/*.{ts,cjs}\" \"*.json\"",
+    "check": "node scripts/check-dependencies.mjs && tsc --noEmit",
+    "format": "prettier --write \"extensions/**/*.{ts,cjs}\" \"scripts/**/*.mjs\" \"*.json\"",
+    "format:check": "prettier --check \"extensions/**/*.{ts,cjs}\" \"scripts/**/*.mjs\" \"*.json\"",
     "test": "node --test --experimental-strip-types extensions/*/*.test.ts && npm --prefix extensions/file-search test"
   }
 }
