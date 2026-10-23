@@ -50,7 +50,7 @@
   },
   "type": "module",
   "scripts": {
-    "check": "node scripts/check-dependencies.mjs && tsc --noEmit",
+    "check": "node scripts/check-dependencies.mjs && node scripts/check-runtime.mjs && tsc --noEmit",
     "format": "prettier --write \"extensions/**/*.{ts,cjs}\" \"scripts/**/*.mjs\" \"tests/**/*.mjs\" \"*.json\"",
     "format:check": "prettier --check \"extensions/**/*.{ts,cjs}\" \"scripts/**/*.mjs\" \"tests/**/*.mjs\" \"*.json\"",
     "test": "node scripts/test.mjs",
