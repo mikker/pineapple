@@ -1,4 +1,4 @@
-# Mikkel's Pi extensions
+# Pineapple — Mikkel's Pi extensions
 
 Fork of [davis7dotsh/my-pi-setup](https://github.com/davis7dotsh/my-pi-setup),
 based on upstream `5a0863f` and tested with Pi 1.4.0.
@@ -6,10 +6,10 @@ based on upstream `5a0863f` and tested with Pi 1.4.0.
 Install from this fork:
 
 ```sh
-pi install git:github.com/mikker/my-pi-setup
+pi install git:github.com/mikker/pineapple
 ```
 
-Update with `pi update git:github.com/mikker/my-pi-setup`. Upstream changes are
+Update with `pi update git:github.com/mikker/pineapple`. Upstream changes are
 merged deliberately; updating Pi packages follows this fork, not upstream.
 
 ## Dependency layout

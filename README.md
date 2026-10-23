@@ -1,4 +1,9 @@
-# my pi setup
+# Pineapple
+
+Mikkel's Pi extensions, forked from
+[Benjamin Davis's my-pi-setup](https://github.com/davis7dotsh/my-pi-setup).
+Original attribution, history, and MIT license are preserved. See [FORK.md](./FORK.md)
+for installation and fork maintenance.
 
 This setup is fairly opinionated, it:
 
