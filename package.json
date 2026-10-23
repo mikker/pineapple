@@ -3,18 +3,25 @@
   "workspaces": [
     "extensions/*"
   ],
+  "pi": {
+    "extensions": [
+      "./extensions/ask-user/index.ts",
+      "./extensions/background-terminals/index.ts",
+      "./extensions/file-search/index.ts",
+      "./extensions/firecrawl-search/index.ts",
+      "./extensions/subagents/index.ts",
+      "./extensions/inline-skills/index.ts",
+      "./extensions/prompt-box/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
   "overrides": {
-    "effect": "$effect",
-    "@effect/platform-node": "$@effect/platform-node",
-    "@effect/platform-node-shared": "4.0.0-beta.101",
-    "@effect/vitest": "4.0.0-beta.101"
+    "effect": "$effect"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-beta.101",
-    "acorn": "^8.17.0",
-    "effect": "4.0.0-beta.101",
-    "firecrawl": "^4.30.0",
-    "ioredis": "5.11.1"
+    "effect": "4.0.0-beta.101"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -44,8 +51,9 @@
   "type": "module",
   "scripts": {
     "check": "node scripts/check-dependencies.mjs && tsc --noEmit",
-    "format": "prettier --write \"extensions/**/*.{ts,cjs}\" \"scripts/**/*.mjs\" \"*.json\"",
-    "format:check": "prettier --check \"extensions/**/*.{ts,cjs}\" \"scripts/**/*.mjs\" \"*.json\"",
-    "test": "node --test --experimental-strip-types extensions/*/*.test.ts && npm --prefix extensions/file-search test"
+    "format": "prettier --write \"extensions/**/*.{ts,cjs}\" \"scripts/**/*.mjs\" \"tests/**/*.mjs\" \"*.json\"",
+    "format:check": "prettier --check \"extensions/**/*.{ts,cjs}\" \"scripts/**/*.mjs\" \"tests/**/*.mjs\" \"*.json\"",
+    "test": "node scripts/test.mjs",
+    "test:live": "node --test extensions/subagents/claude.test.ts extensions/subagents/codex.test.ts"
   }
 }

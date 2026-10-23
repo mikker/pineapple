@@ -13,12 +13,11 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-  query,
-  type SDKAssistantMessage,
-  type SDKMessage,
-  type SDKResultMessage,
-  type SDKUserMessage,
+import type {
+  SDKAssistantMessage,
+  SDKMessage,
+  SDKResultMessage,
+  SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { Cause, Scope } from "effect";
 import { Effect, Queue, Stream } from "effect";
@@ -288,6 +287,10 @@ const makeClaudeSession = (
   task: SpawnTask,
 ): Effect.Effect<SubagentSession, SpawnError, Scope.Scope> =>
   Effect.gen(function* () {
+    const { query } = yield* Effect.tryPromise({
+      try: () => import("@anthropic-ai/claude-agent-sdk"),
+      catch: (error) => new SpawnError({ message: boundedError(error) }),
+    });
     const input = new ClaudeInput();
     const abortController = new AbortController();
     const events = yield* Queue.make<SubagentEvent, Cause.Done>();

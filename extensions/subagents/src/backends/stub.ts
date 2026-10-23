@@ -1,6 +1,6 @@
 /**
- * Scripted stub sessions shared by all three backend implementations while
- * the real integrations are pending. A stub session:
+ * Offline manager-test fixture. Production never imports this backend.
+ * A stub session:
  *
  * - streams a plausible turn (thinking deltas, one fake tool cycle, text
  *   deltas, usage ramp, a final assistant message, RunSettled) over a few

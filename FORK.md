@@ -18,11 +18,11 @@ Extensions are npm workspaces. Install once at the repository root; the root
 `package-lock.json` is authoritative. Do not install each extension separately:
 separate copies of Effect add seconds to every Pi startup.
 
-The Effect family is pinned to compatible prerelease versions. Its old caret
-ranges also accept newer stable releases with incompatible APIs. Non-host runtime
-peers are explicit dependencies because Pi's managed installer suppresses automatic
-peer installation. Development-only Effect compiler patching is an explicit
-`patch-types` command, not an install hook, so production installs need no compiler.
+The remaining Effect dependency is pinned for the subagent backend lifecycle. Its
+old caret range also accepts newer stable releases with incompatible APIs. Questions,
+background terminals, search and Firecrawl use native promises/Node APIs instead.
+Non-host runtime peers are explicit dependencies because Pi's managed installer
+suppresses automatic peer installation. There are no production compiler hooks.
 
 Pi supplies its own `@earendil-works/pi-*` packages and `typebox`. These remain
 optional host peers rather than installing a duplicate Pi runtime.
@@ -41,6 +41,5 @@ upgrading Pi. Normal extension loading resolves these peers through Pi itself.
 Run `npm run check` and `npm run format:check`. The check includes a regression
 guard that all workspaces resolve the same pinned Effect runtime.
 
-The root `npm test` also runs live Claude and Codex tests. To test offline, exclude
-`extensions/subagents/claude.test.ts` and `extensions/subagents/codex.test.ts` from
-the Node test file list, then run `npm --workspace file-search test`.
+`npm test` runs the offline regression suite. Live provider tests are separated
+behind the explicit `npm run test:live` command; they can make billable requests.

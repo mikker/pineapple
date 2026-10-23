@@ -29,7 +29,6 @@ import type {
   RunOutcome,
   SpawnTask,
   SubagentEvent,
-  SubagentOrigin,
   SubagentMeta,
   SubagentSnapshot,
   SubagentStatus,
@@ -74,7 +73,6 @@ function appendTranscript(snapshot: MutableSnapshot, item: TranscriptItem) {
 /** Mutable snapshot; exposed to readers via the readonly SubagentSnapshot type. */
 interface MutableSnapshot {
   id: string;
-  origin: SubagentOrigin;
   backend: BackendName;
   title: string;
   prompt: string;
@@ -113,12 +111,6 @@ export interface SubagentReadModel {
   size(): number;
   /** Any-change notification (footer status, dashboard). */
   subscribe(listener: () => void): () => void;
-  /** Per-subagent notification (takeover view). */
-  subscribeTo(id: string, listener: () => void): () => void;
-  /** Fire-and-forget: steer/continue a subagent (takeover input). */
-  requestSend(id: string, text: string): void;
-  /** Fire-and-forget: abort a running subagent (dashboard `x`, takeover). */
-  requestAbort(id: string): void;
   /**
    * Register the settle hook. `consumed` is true when an active
    * subagent_wait/cancel is collecting the result (so it must not also be
@@ -186,16 +178,14 @@ const makeManager = Effect.gen(function* () {
   /** One-shot nextChange waiters, swapped out before invocation so waiters
    * re-registering during notification are not visited in the same sweep. */
   let changeWaiters: Array<() => void> = [];
-  const idListeners = new Map<string, Set<() => void>>();
   const cleanups = new Set<Fiber.Fiber<unknown>>();
   let modelCounter = 0;
-  let btwCounter = 0;
   let reserved = 0;
   let disposed = false;
   let onSettled:
     ((snap: SubagentSnapshot, consumed: boolean) => void) | undefined;
 
-  const notify = (id?: string) => {
+  const notify = () => {
     const waiters = changeWaiters;
     changeWaiters = [];
     for (const waiter of waiters) waiter();
@@ -204,15 +194,6 @@ const makeManager = Effect.gen(function* () {
         listener();
       } catch {
         // A failed status/render listener must not corrupt lifecycle state.
-      }
-    }
-    if (id) {
-      for (const listener of idListeners.get(id) ?? []) {
-        try {
-          listener();
-        } catch {
-          // Same.
-        }
       }
     }
   };
@@ -301,7 +282,7 @@ const makeManager = Effect.gen(function* () {
     s.liveTools = [];
     s.queued = [];
     const consumed = (waitInterest.get(s.id) ?? 0) > 0;
-    notify(s.id);
+    notify();
     try {
       // During teardown, don't queue results into a shutting-down session.
       if (!disposed) onSettled?.(s, consumed);
@@ -416,7 +397,7 @@ const makeManager = Effect.gen(function* () {
         s.errorText = bounded(event.message);
         break;
     }
-    notify(s.id);
+    notify();
   };
 
   const spawn = (backendName: BackendName, task: SpawnTask) =>
@@ -465,14 +446,11 @@ const makeManager = Effect.gen(function* () {
           });
         }
 
-        const origin = task.origin ?? "model";
-        const id =
-          origin === "btw" ? `btw-${++btwCounter}` : `sa-${++modelCounter}`;
+        const id = `sa-${++modelCounter}`;
         const meta = yield* session.meta;
         const entry: Entry = {
           snapshot: {
             id,
-            origin,
             backend: backendName,
             title: task.title,
             prompt: task.prompt,
@@ -512,7 +490,7 @@ const makeManager = Effect.gen(function* () {
         );
         entry.pump = yield* Scope.provide(Effect.forkScoped(pump), scope);
 
-        notify(id);
+        notify();
         return entry.snapshot as SubagentSnapshot;
       });
 
@@ -569,7 +547,7 @@ const makeManager = Effect.gen(function* () {
           settle(entry, { _tag: "Interrupted" });
           entry.snapshot.errorText =
             "Abort deadline exceeded; session was force-disposed";
-          notify(entry.snapshot.id);
+          notify();
         });
         // Bound the close like disposeAll does: a stuck backend finalizer
         // must not hang cancel after the run is already settled.
@@ -685,28 +663,6 @@ const makeManager = Effect.gen(function* () {
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
-    },
-    subscribeTo: (id, listener) => {
-      let set = idListeners.get(id);
-      if (!set) {
-        set = new Set();
-        idListeners.set(id, set);
-      }
-      set.add(listener);
-      return () => {
-        set.delete(listener);
-        if (set.size === 0) idListeners.delete(id);
-      };
-    },
-    requestSend: (id, text) => {
-      runDetached(send(id, text).pipe(Effect.ignore));
-    },
-    requestAbort: (id) => {
-      const entry = entries.get(id);
-      if (!entry) return;
-      // UI-initiated aborts are not "consumed": the failed result still
-      // flows back to the parent as a follow-up message, matching v1.
-      runDetached(abortEntry(entry).pipe(Effect.ignore));
     },
     setOnSettled: (hook) => {
       onSettled = hook;

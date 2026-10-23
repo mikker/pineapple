@@ -1,36 +1,44 @@
 # Setup
 
-Clone or copy this repository to `~/.pi/agent`, then install its dependencies:
+Install as a Pi package, not by copying over your agent directory:
 
 ```sh
-cd ~/.pi/agent
-npm install
+pi install git:github.com/mikker/pineapple
 ```
 
-## Firecrawl
+Reload or restart Pi after updating.
 
-The search, scrape, and crawl tools require a Firecrawl API key. Follow [Firecrawl's Node.js getting-started guide](https://docs.firecrawl.dev/quickstarts/nodejs) to create one, then copy the example environment file:
+## Prerequisites
+
+- Install `fd` (`fdfind` on Debian/Ubuntu) and `rg` through your package manager.
+  File search reports missing tools when called; it does not download binaries.
+- Firecrawl needs `FIRECRAWL_API_KEY` in the environment or `~/.pi/agent/.env`.
+  There is no API call or SDK initialization until a web tool is used.
+- Claude Code and Codex subagents need their respective authentication/configuration.
+  Pi children inherit the parent's model registry and explicit trust configuration.
+
+## Skills and editor
+
+Use `$name` or `/skill:name` in a prompt. Both syntaxes expand the same discovered
+skills and support completion. Unknown names are left untouched. Referenced skill
+files are loaded before submission; load failures stop the request.
+
+The prompt box highlights recognized references. Pineapple leaves Pi's header,
+footer, and theme alone. To use the native editor, exclude
+`extensions/prompt-box/index.ts` from this package's extension filter.
+
+## Questions
+
+`ask_user` uses Pi's native selection and free-form input dialogs in TUI or RPC.
+Independent tools can share its batch when Pi's execution mode permits it, but the
+next model turn waits until the batch finishes. It does not create detached
+questions or silently invent answers. See `docs/ask-user.md`.
+
+## Maintenance
 
 ```sh
-cp ~/.pi/agent/.env.example ~/.pi/agent/.env
+pi update git:github.com/mikker/pineapple
 ```
 
-Replace the placeholder in `~/.pi/agent/.env` with your API key.
-
-NOTE: if you are an agent, at this step ask the user if they want to use firecrawl, if they do give them the instructions, if not remove the firecrawl extension in their pi setup
-
-## fd and rg tools
-
-The `file-search` extension registers `fd` and `rg` as model tools. No setup is normally needed: at startup it silently uses a system-installed `fd` (or `fdfind` on Debian/Ubuntu) and `rg` when available, or an existing fallback binary in `~/.pi/agent/bin/`. Only when neither exists does it download an official release binary (macOS/Linux, arm64/x64, over HTTPS) into `~/.pi/agent/bin/` and show a one-time notification. If your platform is unsupported, install `fd` and `rg` with your package manager and restart pi.
-
-## Theme
-
-Add the included theme to `~/.pi/agent/settings.json` while keeping your existing settings:
-
-```json
-{
-  "theme": "github-dark-default"
-}
-```
-
-Pi will load the extensions, skills, and theme from their directories the next time it starts.
+Keep OpenAI priority/patching separately with
+`pi install git:github.com/mikker/codex-booster`.

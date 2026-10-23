@@ -9,13 +9,8 @@
  * - bg_list: list all tracked terminals (running and settled).
  * - bg_kill: SIGTERM→SIGKILL the whole process tree; returns final state.
  *
- * While ≥1 process runs, a one-line widget above the editor shows
- * "N background terminal(s) running • /ps to view". `/ps` opens a two-stage
- * full-screen overlay (list → read-only detail with stdout/stderr toggle).
- *
- * Architecture: Effect v4 core (manager service behind one ManagedRuntime);
- * this file is the async boundary where tool handlers run effects via
- * runTool. Node stream plumbing inside the manager is plain callbacks.
+ * `/ps` lists terminals; `/ps bt-1` inspects bounded output using Pi's UI.
+ * Native processes and promises are owned by one session-scoped manager.
  */
 
 import * as fs from "node:fs";
@@ -29,7 +24,10 @@ import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { TerminalSnapshot } from "./src/domain.ts";
-import { TerminalManager, type TerminalManagerShape } from "./src/manager.ts";
+import {
+  createTerminalManager,
+  type TerminalManagerShape,
+} from "./src/manager.ts";
 import {
   BG_KILL_PARAMETER_DESCRIPTIONS,
   BG_KILL_TOOL_DESCRIPTION,
@@ -47,38 +45,28 @@ import {
   describeTerminal,
 } from "./src/prompt.ts";
 import { createDeferredResultDelivery } from "./src/result-delivery.ts";
-import {
-  createTerminalRuntime,
-  runTool,
-  type TerminalRuntime,
-} from "./src/runtime.ts";
 import { sanitizeText } from "./src/ui/output-view.ts";
 import { openTerminalPicker } from "./src/ui/ps.ts";
 
 const WIDGET_KEY = "background-terminals";
 
 export default function (pi: ExtensionAPI) {
-  let runtime: TerminalRuntime | undefined;
-  let managerPromise: Promise<TerminalManagerShape> | undefined;
+  let manager: TerminalManagerShape | undefined;
   let sessionContext: ExtensionContext | undefined;
   let ui: ExtensionUIContext | undefined;
   let unsubStatus: (() => void) | undefined;
   const resultDelivery = createDeferredResultDelivery<TerminalSnapshot>();
 
-  const getRuntime = () => (runtime ??= createTerminalRuntime());
-
-  /** Resolve the manager service once per runtime and wire the extension hooks. */
+  /** Lazily create resources only when a command or tool needs them. */
   const getManager = () => {
-    managerPromise ??= getRuntime()
-      .runPromise(TerminalManager)
-      .then((manager) => {
-        manager.view.setOnSettled(onSettled);
-        unsubStatus?.();
-        unsubStatus = manager.view.subscribe(() => updateWidget(manager));
-        updateWidget(manager);
-        return manager;
-      });
-    return managerPromise;
+    if (!manager) {
+      const created = createTerminalManager();
+      manager = created;
+      created.view.setOnSettled(onSettled);
+      unsubStatus = created.view.subscribe(() => updateWidget(created));
+      updateWidget(created);
+    }
+    return manager;
   };
 
   /** One-line widget directly above the editor, only while ≥1 is running.
@@ -170,7 +158,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", (_event, ctx) => {
     sessionContext = ctx;
-    if (ctx.hasUI) ui = ctx.ui;
+    if (ctx.mode === "tui") ui = ctx.ui;
   });
 
   // Drain deferred results when the agent settles: together with the
@@ -180,9 +168,7 @@ export default function (pi: ExtensionAPI) {
 
   // /new, /resume, /fork, /reload, and quit all emit session_shutdown for
   // the old extension instance. Processes never survive a session
-  // transition: disposing the runtime runs the manager finalizer →
-  // disposeAll → every entry scope → SIGTERM→SIGKILL tree kill, each close
-  // bounded so a wedged process cannot hang shutdown.
+  // transition: disposal terminates every process group and flushes its logs.
   pi.on("session_shutdown", async () => {
     sessionContext = undefined;
     resultDelivery.clear();
@@ -195,9 +181,8 @@ export default function (pi: ExtensionAPI) {
     }
     widgetRunning = 0;
     ui = undefined;
-    const closing = runtime;
-    runtime = undefined;
-    managerPromise = undefined;
+    const closing = manager;
+    manager = undefined;
     await closing?.dispose();
   });
 
@@ -222,8 +207,9 @@ export default function (pi: ExtensionAPI) {
         }),
       ),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const manager = await getManager();
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      signal?.throwIfAborted();
+      const manager = getManager();
 
       const command = params.command.trim();
       if (!command) throw new Error("command must not be empty.");
@@ -237,10 +223,7 @@ export default function (pi: ExtensionAPI) {
       // TUI renderer) before bounding the length.
       const title =
         params.title.replace(/\s+/g, " ").trim().slice(0, 80) || "terminal";
-      const snap = await runTool(
-        getRuntime(),
-        manager.start({ command, title, cwd }),
-      );
+      const snap = await manager.start({ command, title, cwd });
 
       return {
         content: [{ type: "text", text: buildStartResult(snap) }],
@@ -332,11 +315,7 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
-      const report = await runTool(getRuntime(), manager.kill(ids), {
-        signal,
-        interruptMessage:
-          "Kill wait aborted; termination continues in the background.",
-      });
+      const report = await manager.kill(ids, signal);
 
       // Settlement may have happened before this kill began (or during it,
       // via the killInterest consumed flag). Remove any deferred automatic
@@ -420,28 +399,9 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("ps", {
     description: "List and inspect background terminals",
-    handler: async (_args, ctx) => {
+    handler: async (args, ctx) => {
       const manager = await getManager();
-      if (ctx.mode !== "tui") {
-        if (ctx.hasUI) {
-          const terminals = manager.view.list();
-          ctx.ui.notify(
-            terminals.length === 0
-              ? "No background terminals."
-              : terminals.map((snap) => describeTerminal(snap)).join("\n"),
-            "info",
-          );
-        }
-        return;
-      }
-      if (manager.view.size() === 0) {
-        ctx.ui.notify(
-          "No background terminals yet. The agent starts them with bg_start.",
-          "info",
-        );
-        return;
-      }
-      await openTerminalPicker(ctx, manager.view);
+      await openTerminalPicker(ctx, manager.view, args.trim());
     },
   });
 }

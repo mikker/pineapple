@@ -18,10 +18,8 @@ export class OutputBuffer {
   private chunks: string[] = [];
   /** Bytes currently retained across `chunks`. */
   private retainedBytes = 0;
-  /** Cached join of `chunks`; invalidated on push so 1Hz UI ticks are cheap. */
+  /** Cached join of `chunks`; invalidated on push so repeated inspection is cheap. */
   private cachedText: string | undefined = "";
-  /** Bumped on every push; lets the UI cache derived line layouts. */
-  version = 0;
   totalBytes = 0;
   truncatedBytes = 0;
   spillPath?: string;
@@ -68,7 +66,6 @@ export class OutputBuffer {
       this.truncatedBytes += evictedBytes;
     }
     this.cachedText = undefined;
-    this.version++;
     return spillAccepted;
   }
 

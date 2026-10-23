@@ -64,6 +64,6 @@ Call `subagent_spawn` with a complete `prompt`, short `name`, chosen `harness`, 
 - `subagent_list()`: list all runs.
 - `subagent_wait({ ids })`: block only when results are required to proceed.
 - `subagent_cancel({ ids })`: stop runs while preserving partial transcripts.
-- `/subagents`: inspect or take over a run interactively.
+- `/subagents`: inspect a run with native Pi dialogs. Inspection does not steer or take over the child.
 
 Results return automatically. After spawning, continue useful parent work instead of immediately waiting.

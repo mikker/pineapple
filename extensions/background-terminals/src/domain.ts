@@ -6,8 +6,6 @@
  * stderr separately, and settles exactly once into a final state.
  */
 
-import { Data } from "effect";
-
 export type TerminalStatus = "running" | "done" | "failed" | "killed";
 // "done"   = exited with code 0
 // "failed" = exited non-zero, or a spawn-level runtime error after start
@@ -67,21 +65,3 @@ export function formatExit(snap: TerminalSnapshot) {
   if (snap.exitCode !== undefined) return `exit ${snap.exitCode}`;
   return snap.status;
 }
-
-// --- Errors -------------------------------------------------------------------
-
-export class SpawnError extends Data.TaggedError("SpawnError")<{
-  readonly message: string;
-}> {}
-
-export class ConcurrencyLimitError extends Data.TaggedError(
-  "ConcurrencyLimitError",
-)<{
-  readonly message: string;
-}> {}
-
-export class UnknownTerminalError extends Data.TaggedError(
-  "UnknownTerminalError",
-)<{
-  readonly message: string;
-}> {}

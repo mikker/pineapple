@@ -19,6 +19,7 @@ export const ASK_USER_PROMPT_SNIPPET =
 export const ASK_USER_PROMPT_GUIDELINES = [
   "When asking the user a question whose likely answers can be enumerated, use the ask_user tool instead of asking in plain text.",
   "Ask one question per ask_user call; ask follow-up questions in subsequent calls.",
+  "When possible, issue ask_user alongside independent tool calls in the same response. Sibling tools may run while the user answers, but the next model turn waits for the answer or dismissal. Do not assume an answer before receiving it.",
 ];
 
 /** Builds the behavioral tool-result message returned to the parent model for an ask_user outcome. */

@@ -2,15 +2,13 @@
  * End-to-end smoke tests: manager behavior through a real ManagedRuntime,
  * exactly as the tool handlers drive it. The registry is test-only: scripted
  * stub sessions registered under the claude/codex names (the production
- * backends launch real processes and have their own live test files), plus
- * the real pi backend for its cheap registry precondition.
+ * backends launch real processes and have their own live test files).
  */
 
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { BackendRegistry, type SubagentBackend } from "./src/backend.ts";
-import { piBackend } from "./src/backends/pi.ts";
 import { makeStubBackend } from "./src/backends/stub.ts";
 import type { BackendName, ParentContext, SpawnTask } from "./src/domain.ts";
 import {
@@ -22,7 +20,6 @@ import { runTool } from "./src/runtime.ts";
 
 const TestRegistryLive = Layer.sync(BackendRegistry, () => {
   const backends: SubagentBackend[] = [
-    piBackend,
     makeStubBackend({
       backend: "claude",
       defaultModelLabel: "claude/sonnet",
@@ -138,63 +135,40 @@ test("cancel interrupts a running stub subagent", async () => {
   });
 });
 
-test("spawn origin propagates to ids, snapshots, and settlement", async () => {
+test("aborting a wait leaves the child running and releases delivery interest", async () => {
   await withManager(async (manager, runtime) => {
-    const settled: Array<{ id: string; origin: string }> = [];
-    manager.view.setOnSettled((snap) =>
-      settled.push({ id: snap.id, origin: snap.origin }),
-    );
-
-    const model = await runTool(
+    const settled: boolean[] = [];
+    manager.view.setOnSettled((_snap, consumed) => settled.push(consumed));
+    const snap = await runTool(
       runtime,
-      manager.spawn("codex", task("model task")),
+      manager.spawn("claude", task("keep working")),
     );
-    const btw = await runTool(
+    const controller = new AbortController();
+    const waiting = runTool(
       runtime,
-      manager.spawn("claude", { ...task("side question"), origin: "btw" }),
+      manager.waitFor([snap.id], () => {
+        controller.abort();
+      }),
+      { signal: controller.signal },
     );
-
-    assert.match(model.id, /^sa-/);
-    assert.equal(model.origin, "model");
-    assert.match(btw.id, /^btw-/);
-    assert.equal(btw.origin, "btw");
-
-    await runTool(runtime, manager.cancel([model.id, btw.id]));
-    assert.deepEqual(
-      settled.sort((a, b) => a.id.localeCompare(b.id)),
-      [
-        { id: btw.id, origin: "btw" },
-        { id: model.id, origin: "model" },
-      ].sort((a, b) => a.id.localeCompare(b.id)),
-    );
+    await assert.rejects(waiting, /aborted/i);
+    assert.equal(snap.status, "running");
+    while (snap.status === "running") {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.deepEqual(settled, [false]);
   });
 });
 
-test("the global concurrency cap includes by-the-way sessions", async () => {
+test("runtime shutdown is idempotent and does not deliver child results", async () => {
   await withManager(async (manager, runtime) => {
-    const tasks: SpawnTask[] = [
-      { ...task("side question"), origin: "btw" },
-      task("Task 2"),
-      task("Task 3"),
-      task("Task 4"),
-    ];
-    const spawns = await runTool(
-      runtime,
-      Effect.forEach(tasks, (spawnTask) => manager.spawn("codex", spawnTask), {
-        concurrency: "unbounded",
-      }),
-    );
-    assert.equal(spawns.length, 4);
-    await assert.rejects(
-      runTool(
-        runtime,
-        manager.spawn("codex", {
-          ...task("another side question"),
-          origin: "btw",
-        }),
-      ),
-      /Max 4 subagents/,
-    );
+    const settled: string[] = [];
+    manager.view.setOnSettled((snap) => settled.push(snap.id));
+    await runTool(runtime, manager.spawn("claude", task("stop on shutdown")));
+    await runtime.dispose();
+    await runtime.dispose();
+    assert.equal(manager.view.size(), 0);
+    assert.deepEqual(settled, []);
   });
 });
 
@@ -216,11 +190,11 @@ test("the concurrency cap rejects a fifth running subagent", async () => {
   });
 });
 
-test("pi spawn fails fast without the parent model registry", async () => {
+test("unknown backend failures release the concurrency reservation", async () => {
   await withManager(async (manager, runtime) => {
     await assert.rejects(
-      runTool(runtime, manager.spawn("pi", task("needs a registry"))),
-      /model registry/,
+      runTool(runtime, manager.spawn("pi", task("unknown backend"))),
+      /Unknown backend/,
     );
     // The failed spawn must release its concurrency reservation.
     const snap = await runTool(runtime, manager.spawn("codex", task("ok")));

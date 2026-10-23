@@ -11,16 +11,16 @@
  *   the child session_shutdown hook and disposes the session.
  */
 
-import type { AssistantMessage, Message, Model } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import type {
   AgentSession,
   AgentSessionEvent,
-  ModelRegistry,
 } from "@earendil-works/pi-coding-agent";
 import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -51,38 +51,39 @@ const CHILD_EXCLUDED_TOOL_NAMES = [
 
 // --- Model + effort resolution -----------------------------------------------
 
-type ThinkingLevel = NonNullable<
-  NonNullable<Parameters<typeof createAgentSession>[0]>["thinkingLevel"]
->;
-
 /**
- * Resolve the generic model hint against the parent registry (v1 semantics):
+ * Resolve the generic model hint against the child's canonical model runtime:
  * "provider/model-id" is exact; a bare id prefers the inherited provider,
  * then must be unambiguous across providers. No hint inherits the parent
  * model; with nothing to inherit, the SDK default applies.
  */
-function resolvePiModel(
-  registry: ModelRegistry,
+export function resolvePiModel(
+  runtime: Pick<ModelRuntime, "getModel" | "getModels">,
   hint: string | undefined,
   inherited: { provider: string; id: string } | undefined,
-): Model<any> | undefined {
+) {
   if (!hint) {
     if (!inherited) return undefined;
-    return registry.find(inherited.provider, inherited.id) ?? undefined;
+    const model = runtime.getModel(inherited.provider, inherited.id);
+    if (!model)
+      throw new Error(
+        `Unknown inherited model "${inherited.provider}/${inherited.id}".`,
+      );
+    return model;
   }
   const slash = hint.indexOf("/");
   if (slash > 0) {
     const provider = hint.slice(0, slash);
     const id = hint.slice(slash + 1);
-    const found = registry.find(provider, id);
+    const found = runtime.getModel(provider, id);
     if (found) return found;
     throw new Error(`Unknown model "${hint}".`);
   }
   if (inherited) {
-    const found = registry.find(inherited.provider, hint);
+    const found = runtime.getModel(inherited.provider, hint);
     if (found) return found;
   }
-  const matches = registry.getAll().filter((m) => m.id === hint);
+  const matches = runtime.getModels().filter((m) => m.id === hint);
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) {
     throw new Error(
@@ -124,7 +125,13 @@ function waitBounded(operation: Promise<unknown>, timeoutMs: number) {
 }
 
 /** Emit child session_shutdown (bounded), then dispose. Never throws. */
-async function shutdownAndDisposeChildSession(session: AgentSession) {
+export async function shutdownAndDisposeChildSession(session: {
+  extensionRunner: Pick<
+    AgentSession["extensionRunner"],
+    "hasHandlers" | "emit"
+  >;
+  dispose: AgentSession["dispose"];
+}) {
   try {
     if (session.extensionRunner.hasHandlers("session_shutdown")) {
       await waitBounded(
@@ -263,50 +270,63 @@ const makePiSession = (
   task: SpawnTask,
 ): Effect.Effect<SubagentSession, SpawnError, Scope.Scope> =>
   Effect.gen(function* () {
-    const registry = task.parent.modelRegistry;
-    if (!registry) {
-      return yield* new SpawnError({
-        message: "pi backend requires the parent session's model registry.",
-      });
-    }
+    const modelRuntime = yield* Effect.tryPromise({
+      try: () => ModelRuntime.create(),
+      catch: (error) => new SpawnError({ message: boundedError(error) }),
+    });
 
     const model = yield* Effect.try({
       try: () =>
-        resolvePiModel(registry, task.model, task.parent.inheritedModel),
+        resolvePiModel(modelRuntime, task.model, task.parent.inheritedModel),
       catch: (error) => new SpawnError({ message: boundedError(error) }),
     });
     // pi's thinking levels ARE the shared reasoning-effort scale.
-    const thinkingLevel = (task.reasoningEffort ??
-      task.parent.inheritedThinkingLevel) as ThinkingLevel | undefined;
+    const thinkingLevel =
+      task.reasoningEffort ?? task.parent.inheritedThinkingLevel;
 
-    const session = yield* Effect.tryPromise({
-      try: async () => {
-        const { loader, settingsManager } = await createChildResources(
-          task.cwd,
-          task.parent.projectTrusted,
-        );
-        const { session } = await createAgentSession({
-          cwd: task.cwd,
-          sessionManager: SessionManager.create(task.cwd),
-          settingsManager,
-          resourceLoader: loader,
-          model,
-          thinkingLevel,
-          excludeTools: [...CHILD_EXCLUDED_TOOL_NAMES],
-        });
-        // Start child extension session hooks/resources in headless mode.
-        // A rejection here would otherwise leak the freshly created session:
-        // the scope finalizer that owns cleanup is only registered later.
-        try {
-          await session.bindExtensions({ mode: "print" });
-        } catch (error) {
-          await shutdownAndDisposeChildSession(session);
-          throw error;
-        }
-        return session;
-      },
-      catch: (error) => new SpawnError({ message: boundedError(error) }),
-    });
+    // Allocation and finalizer registration must be atomic with respect to
+    // cancellation. createAgentSession/bindExtensions do not take an abort
+    // signal; interrupting tryPromise alone would leak a late-created child.
+    const session = yield* Effect.acquireRelease(
+      Effect.tryPromise({
+        try: async () => {
+          const { loader, settingsManager } = await createChildResources(
+            task.cwd,
+            task.parent.projectTrusted,
+          );
+          const { session } = await createAgentSession({
+            cwd: task.cwd,
+            sessionManager: SessionManager.create(task.cwd),
+            settingsManager,
+            resourceLoader: loader,
+            modelRuntime,
+            model,
+            thinkingLevel,
+            excludeTools: [...CHILD_EXCLUDED_TOOL_NAMES],
+          });
+          // Start child extension session hooks/resources in headless mode.
+          // A rejection here would otherwise leak the freshly created session:
+          // the scope finalizer that owns cleanup is only registered later.
+          try {
+            await session.bindExtensions({ mode: "print" });
+          } catch (error) {
+            await shutdownAndDisposeChildSession(session);
+            throw error;
+          }
+          return session;
+        },
+        catch: (error) => new SpawnError({ message: boundedError(error) }),
+      }),
+      (session) =>
+        Effect.promise(async () => {
+          try {
+            session.clearQueue();
+            await waitBounded(session.abort(), CHILD_SHUTDOWN_TIMEOUT_MS);
+          } finally {
+            await shutdownAndDisposeChildSession(session);
+          }
+        }),
+    );
 
     const state = {
       closed: false,
@@ -325,7 +345,7 @@ const makePiSession = (
     const toolTimeout = createToolCallTimeoutGuard();
     toolTimeout.apply(session);
 
-    const activeModel = (): Model<any> | undefined => {
+    const activeModel = () => {
       const sessionModel = session.model;
       const last = lastAssistantMessage(session);
       if (!last) return sessionModel;
@@ -338,8 +358,10 @@ const makePiSession = (
         return sessionModel;
       }
       return (
-        registry.find(last.provider, last.responseModel ?? last.model) ??
-        sessionModel
+        modelRuntime.getModel(
+          last.provider,
+          last.responseModel ?? last.model,
+        ) ?? sessionModel
       );
     };
 
@@ -488,13 +510,6 @@ const makePiSession = (
       Effect.promise(async () => {
         state.closed = true;
         unsubscribe();
-        try {
-          session.clearQueue();
-        } catch {
-          // Continue with abort/dispose.
-        }
-        await waitBounded(session.abort(), CHILD_SHUTDOWN_TIMEOUT_MS);
-        await shutdownAndDisposeChildSession(session);
         Queue.endUnsafe(events);
       }),
     );
@@ -514,9 +529,7 @@ const makePiSession = (
 
     // Session naming is best-effort.
     yield* Effect.try(() =>
-      session.sessionManager.appendSessionInfo(
-        `${task.origin === "btw" ? "btw" : "subagent"}: ${task.title}`,
-      ),
+      session.sessionManager.appendSessionInfo(`subagent: ${task.title}`),
     ).pipe(Effect.ignore);
 
     emit({ _tag: "MetaChanged", meta: currentMeta() });
@@ -549,13 +562,7 @@ const makePiSession = (
           // Abort regardless.
         }
         await session.abort().catch(() => undefined);
-        // Only resolve once streaming has actually stopped: reporting the
-        // interrupt as complete while the run keeps working would let the
-        // manager settle a run that is still mutating the workspace. The
-        // manager bounds this effect at 5s and force-disposes on timeout.
-        while (!state.closed && session.isStreaming) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
+        // The current SDK's abort() waits for idle; no polling loop is needed.
         // No streaming run means no agent_settled will arrive; emit the
         // terminal event (once) so the run cannot look running forever.
         if (!state.closed && !state.settled) {

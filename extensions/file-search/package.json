@@ -6,18 +6,10 @@
     "check": "tsc --noEmit -p .",
     "format": "prettier --write \"**/*.{ts,json}\"",
     "format:check": "prettier --check \"**/*.{ts,json}\"",
-    "patch-types": "effect-tsgo patch",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "dependencies": {
-    "@effect/platform-node": "4.0.0-beta.101",
-    "effect": "4.0.0-beta.101"
+    "test": "node --test --experimental-strip-types index.test.ts",
+    "test:watch": "node --test --watch --experimental-strip-types index.test.ts"
   },
   "devDependencies": {
-    "@effect/tsgo": "^0.24.2",
-    "@effect/vitest": "4.0.0-beta.101",
-    "typescript": "^7.0.2",
-    "vitest": "4.1.10"
+    "typescript": "^7.0.2"
   }
 }

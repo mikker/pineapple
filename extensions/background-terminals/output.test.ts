@@ -96,14 +96,12 @@ test("spill callback receives every chunk in order, even after eviction", () => 
   assert.equal(buf.view().text, "cccc");
 });
 
-test("view text is cached between pushes and version increments per push", () => {
+test("view text is stable between pushes and invalidates on new output", () => {
   const buf = new OutputBuffer(1024);
   buf.push("a");
   const first = buf.view();
   const second = buf.view();
   assert.equal(first.text, second.text);
-  const versionBefore = buf.version;
   buf.push("b");
-  assert.equal(buf.version, versionBefore + 1);
   assert.equal(buf.view().text, "ab");
 });
